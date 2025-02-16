@@ -256,36 +256,62 @@ endmodule
 
 
 \TLV my_design()
-
-   // following pipe is just an use case of how UART receiver and transmitter controller can be used
+   
    |uart
       @0
-         \SV_plus
-            uart_rx #(20000000,115200) uart_rx(.clk(*clk),
-                                               .reset(*reset),
-                                               .rx_serial($rx_serial),
-                                               .rx_done($$rx_done),
-                                               .rx_byte($$rx_byte[7:0])
-                                               );
          $rx_serial = *ui_in[6];   // pmod connector's TxD port
+         
+         // uart receiver can be integrated the following way
+         \SV_plus
+            uart_rx #(20000000,115200) uart_rx_1(.clk(*clk),
+                                            .reset(*reset),
+                                            .rx_serial($rx_serial),
+                                            .rx_done($$rx_done),
+                                            .rx_byte($$rx_byte[7:0])
+                                            );
+         
+         //$tx_byte[7:0] = {*ui_in[7:0]};
          $received = $rx_done;
+         *uo_out[7] = $received;
          $received_byte[7:0] = $rx_byte[7:0];
 
-      @1
-         $tx_dv = $received;
-         $tx_byte[7:0] = $received_byte + 8'd1;   // add 1 to the received byte and send the data
-         \SV_plus
-            uart_tx #(20000000,115200) uart_tx( .clk(*clk),
-                                   .reset(*reset),
-                                   .tx_dv($tx_dv),
-                                   .tx_byte($tx_byte[7:0]),
-                                   .tx_active($$tx_active),
-                                   .tx_serial($$tx_serial),
-                                   .tx_done($$tx_done));
-         
-         *uo_out[0] = $tx_active;
-         *uo_out[1] = $tx_done;
-         *uo_out[5] = $tx_serial;   // pmod connector's RxD port
+         // display the LS nibble on the seven seg
+         $digit[3:0] = $received_byte[3:0];
+
+      @1 //display logic
+         *uo_out =   $digit == 4'd0
+                         ? 8'b0011_1111 :
+                     $digit == 4'd1
+                         ? 8'b00000110 :
+                     $digit == 4'd2
+                         ? 8'b01011011 :
+                     $digit == 4'd3
+                         ? 8'b01001111 :
+                     $digit == 4'd4
+                         ? 8'b01100110 :
+                     $digit == 4'd5
+                         ? 8'b01101101 :
+                     $digit == 4'd6
+                         ? 8'b01111101 :
+                     $digit == 4'd7
+                         ? 8'b00000111 :
+                     $digit == 4'd8
+                         ? 8'b01111111 :
+                     $digit == 4'd9
+                         ? 8'b01101111 :
+                     $digit == 4'd10
+                         ? 8'b01110111 :
+                     $digit == 4'd11
+                         ? 8'b01111100 :
+                     $digit == 4'd12
+                         ? 8'b00111001 :
+                     $digit == 4'd13
+                         ? 8'b01011110 :
+                     $digit == 4'd14
+                         ? 8'b01111001 :
+                     $digit == 4'd15
+                         ? 8'b01110001 :
+                         8'b00000000;
    
 
    
@@ -381,7 +407,6 @@ module m5_user_module_name (
    m5_if(m5_in_fpga, ['m5+tt_lab()'], ['m5+my_design()'])
 
 \SV_plus
-   
    // ==========================================
    // If you are using Verilog for your design,
    // your Verilog logic goes here.
@@ -389,4 +414,5 @@ module m5_user_module_name (
    // ==========================================
 
 \SV
+
 endmodule
