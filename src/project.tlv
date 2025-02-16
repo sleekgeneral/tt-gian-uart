@@ -38,26 +38,6 @@
       \SV_plus
          // The program in an instruction memory.
          reg [7:0] instrs [15:0], datam[15:0];
-         initial begin
-             instrs[0] = 8'h70; // Custom 8-bit data for instruction 0
-             instrs[1] = 8'h01; // Custom 8-bit data for instruction 1
-             instrs[2] = 8'h80; // Custom 8-bit data for instruction 2
-             instrs[3] = 8'h72;
-             instrs[4] = 8'h13;
-             instrs[5] = 8'h82;
-             instrs[6] = 8'hD3;
-             instrs[7] = 8'h00;
-             instrs[8] = 8'hFF;
-             instrs[9] = 8'hFF; // Custom data for instruction 10
-             ///data values
-             datam[0] =8'h00;
-             datam[1] =8'h06;
-             datam[2] =8'h04;
-             datam[3] =8'h01;
-             datam[4] =8'h09;
-             datam[8] =8'h05;
-         end
-      
       $instr_mem[7:0] = instrs\[$imem_rd_addr\];
       ?$rd_en
          $data_rd[7:0] = datam\[$idata_rd_addr\];
@@ -499,8 +479,8 @@ endmodule
                      !$reset_uart && ($take_address)
                         ? $address_u[3:0]:
                      *ui_in[0]
-                        ? $pc[3:0] :
-                        $pc[3:0];
+                        ? $acc[7:4] :
+                        $acc[3:0];
          *uo_out[7:0] = $digit[3:0] == 4'b0000
              ? 8'b00111111 :
              $digit[3:0] == 4'b0001
