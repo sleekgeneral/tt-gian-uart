@@ -485,9 +485,13 @@ endmodule
                          !$is_brl 
                             ? $acc:
                             $pc;
-         $digit[3:0] = !$reset_uart && ($take_data || $take_address) && *ui_in[0]
+         $digit[3:0] = !$reset_uart && ($take_data) && *ui_in[0]
                         ? $value_u[7:4]:
-                     !$reset_uart && ($take_data || $take_address)
+                     !$reset_uart && ($take_data)
+                        ? $address[3:0]:
+                     !$reset_uart && ($take_address) && *ui_in[0]
+                        ? $address[7:4]:
+                     !$reset_uart && ($take_address)
                         ? $value_u[3:0]:
                      *ui_in[0]
                         ? $pc[3:0] :
