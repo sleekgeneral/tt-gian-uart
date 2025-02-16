@@ -482,9 +482,9 @@ endmodule
                             ? $acc[7:0]:
                             $pc;
          $digit[3:0] = !$reset_uart && ($take_data) && *ui_in[0]
-                        ? $instrs[7:4]:
+                        ? $instr_wr[7:4]:
                      !$reset_uart && ($take_data)
-                        ? $instrs[3:0]:
+                        ? $instr_wr[3:0]:
                      !$reset_uart && ($take_address) && *ui_in[0]
                         ? $address_u[7:4]:
                      !$reset_uart && ($take_address)
