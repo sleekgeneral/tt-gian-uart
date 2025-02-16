@@ -307,7 +307,7 @@ endmodule
       @1
          $wr_en = $reset_uart ? $wr_en_l : $wr_en_u;
          $data_wr[7:0] = $reset_uart ? $data_wr_l : $data_wr_u;
-         $idata_wr_addr[3:0] = $reset_uart ? $idata_wr_addr_l : $address[3:0];
+         $idata_wr_addr[3:0] = $reset_uart ? $idata_wr_addr_l : $address_u;
          //uart
          $rx_serial = *ui_in[6];   // pmod connector's TxD port
          $reset_uart = *reset || $run;
@@ -365,11 +365,18 @@ endmodule
                         $rx_done
                            ? {>>1$value_u[7:4],$data_u[3:0]}:
                            >>1$value_u[7:0];
+         $address_u[3:0] = ($address >= 8'h41 && $address <= 8'h5A && $rx_done)
+                           ? ($address[3:0] - 4'h7):
+                        ($address >= 8'h61 && $address <= 8'h69 && $rx_done)
+                           ? $address[3:0] - 4'h7:
+                        $rx_done
+                           ? $address[3:0]:
+                           >>1$address_u[3:0];
          
          
          $instr_wr_en = $take_data && $rx_done && $prog;
          $wr_en_u = $take_data && $rx_done && !$prog;
-         $imem_wr_addr[7:0] = $address;//$address;
+         $imem_wr_addr[7:0] = $address_u;//$address;
          $data_wr_u[7:0] = $wr_en_u && $take_data
                            ? $value_u :
                            >>1$data_wr_u;
@@ -488,11 +495,9 @@ endmodule
          $digit[3:0] = !$reset_uart && ($take_data) && *ui_in[0]
                         ? $value_u[7:4]:
                      !$reset_uart && ($take_data)
-                        ? $address[3:0]:
-                     !$reset_uart && ($take_address) && *ui_in[0]
-                        ? $address[7:4]:
-                     !$reset_uart && ($take_address)
                         ? $value_u[3:0]:
+                     !$reset_uart && ($take_address)
+                        ? $address_u[3:0]:
                      *ui_in[0]
                         ? $pc[3:0] :
                         $pc[3:0];
