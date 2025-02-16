@@ -490,7 +490,7 @@ endmodule
                      !$reset_uart && ($take_data || $take_address)
                         ? $value_u[3:0]:
                      *ui_in[0]
-                        ? $pc[7:4] :
+                        ? $pc[3:0] :
                         $pc[3:0];
          *uo_out[7:0] = $digit[3:0] == 4'b0000
              ? 8'b00111111 :
