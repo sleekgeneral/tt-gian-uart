@@ -37,10 +37,30 @@
    @_stage
       \SV_plus
          // The program in an instruction memory.
-         reg [7:0] instrs [15:0], datam[15:0];
-      $instr_mem[7:0] = instrs\[$imem_rd_addr\];
+         reg [7:0] instrs [16:0], datam[16:0];
+         initial begin
+             instrs[0] = 8'h70; // Custom 8-bit data for instruction 0
+             instrs[1] = 8'h01; // Custom 8-bit data for instruction 1
+             instrs[2] = 8'h80; // Custom 8-bit data for instruction 2
+             instrs[3] = 8'h72;
+             instrs[4] = 8'h13;
+             instrs[5] = 8'h82;
+             instrs[6] = 8'hC7;
+             instrs[7] = 8'h35;
+             instrs[8] = 8'hFF;
+             instrs[9] = 8'hFF; // Custom data for instruction 10
+             ///data values
+             datam[0] =8'h00;
+             datam[1] =8'h06;
+             datam[2] =8'h04;
+             datam[3] =8'h01;
+             datam[4] =8'h09;
+             datam[8] =8'h05;
+         end
+      /* verilator lint_off WIDTHEXPAND */
+      $instr_mem[7:0] = instrs\[$imem_rd_addr[3:0]\];
       ?$rd_en
-         $data_rd[7:0] = datam\[$idata_rd_addr\];
+         $data_rd[7:0] = datam\[$idata_rd_addr[3:0]\];
       \SV_plus
          always@(posedge clk)
             if($wr_en)
@@ -48,6 +68,7 @@
          always@(posedge clk)
             if($instr_wr_en)
                instrs\[$imem_wr_addr[3:0]\] <= $instr_wr[7:0];
+      /* verilator lint_off WIDTHEXPAND */
 
 \SV
 module uart_tx 
@@ -283,122 +304,127 @@ endmodule
    // ==================
    
    // Note that pipesignals assigned here can be found under /fpga_pins/fpga.
-   |lipsi
+   |fsm
       @1
-         $wr_en = $reset_uart ? $wr_en_l : $wr_en_u;
-         $data_wr[7:0] = $reset_uart ? $data_wr_l : $data_wr_u;
-         $idata_wr_addr[3:0] = $reset_uart ? $idata_wr_addr_l : $address_u[3:0];
-         //uart
+         $prog_select = *ui_in[7];// 0 means lipsi 1 means uart
+         
+         $imem_rd_addr[3:0] = /top/fpga_pins/fpga|lipsi>>0$pc[3:0];
+         $instr[7:0] = $instr_mem;
+         $idata_rd_addr[3:0] = /top/fpga_pins/fpga|lipsi>>0$dptr[3:0];
+         $data[7:0] = $data_rd;
+         $rd_en = /top/fpga_pins/fpga|lipsi>>0$rd_en;
+         
+         
+         $wr_en = /top/fpga_pins/fpga|lipsi>>0$reset ? /top/fpga_pins/fpga|uart>>0$wr_en : /top/fpga_pins/fpga|lipsi>>0$wr_en;
+         $idata_wr_addr[3:0] = /top/fpga_pins/fpga|lipsi>>0$reset ? /top/fpga_pins/fpga|uart>>0$idata_wr_addr[3:0] :/top/fpga_pins/fpga|lipsi>>0$dptr[3:0];
+         $data_wr[7:0] = /top/fpga_pins/fpga|lipsi>>0$reset ? /top/fpga_pins/fpga|uart>>0$data_wr : /top/fpga_pins/fpga|lipsi>>0$data_wr;
+         
+         $instr_wr[7:0] = /top/fpga_pins/fpga|uart>>0$instr_wr[7:0];
+         $imem_wr_addr[3:0] = /top/fpga_pins/fpga|uart>>0$imem_wr_addr[3:0];
+         $instr_wr_en = /top/fpga_pins/fpga|uart>>0$instr_wr_en;
+         $digit[3:0] = /top/fpga_pins/fpga|lipsi>>0$reset ? /top/fpga_pins/fpga|uart>>0$digit : /top/fpga_pins/fpga|lipsi>>0$digit;
+         *uo_out[7:0] = $digit[3:0] == 4'b0000
+             ? 8'b00111111 :
+             $digit[3:0] == 4'b0001
+             ? 8'b00000110 :
+             $digit[3:0] == 4'b0010
+             ? 8'b01011011 :
+             $digit[3:0] == 4'b0011
+             ? 8'b01001111 :
+             $digit[3:0] == 4'b0100
+             ? 8'b01100110 :
+             $digit[3:0] == 4'b0101
+             ? 8'b01101101 :
+             $digit[3:0] == 4'b0110
+             ? 8'b01111101 :
+             $digit[3:0] == 4'b0111
+             ? 8'b00000111 :
+             $digit[3:0] == 4'b1000
+             ? 8'b01111111 :
+             $digit[3:0] == 4'b1001
+             ? 8'b01101111 :
+             $digit[3:0] == 4'b1010
+             ? 8'b01110111 :
+             $digit[3:0] == 4'b1011
+             ? 8'b01111100 :
+             $digit[3:0] == 4'b1100
+             ? 8'b00111001 :
+             $digit[3:0] == 4'b1101
+             ? 8'b01011110 :
+             $digit[3:0] == 4'b1110
+             ? 8'b01111001 : 8'b01110001 ;
+      m5+imem(@1)
+   
+   |uart
+      @1
+         
+         $pc[3:0] = $reset
+                     ? 4'b0:
+                  $instr_wr_en
+                     ?>>1$pc+1:
+                     >>1$pc;
+         
+         $dptr[3:0] = $reset
+                     ? 4'b0:
+                  $wr_en
+                     ?>>1$dptr+1:
+                     >>1$dptr;
+         
+         $reset = !/top/fpga_pins/fpga|fsm>>0$prog_select || *reset ;
+         
          $rx_serial = *ui_in[6];   // pmod connector's TxD port
-         $reset_uart = *reset || $run;
-         // uart receiver can be integrated the following way
+         
+         $prog_mem = *ui_in[5];//0 means data 1 means instruction
+         
          \SV_plus
             uart_rx #(20000000,115200) uart_rx_1(.clk(*clk),
-                                            .reset($reset_uart),
+                                            .reset($reset),
                                             .rx_serial($rx_serial),
                                             .rx_done($$rx_done),
                                             .rx_byte($$rx_byte[7:0])
                                             );
-         $is_p = (($rx_byte==8'h50) || ($rx_byte==8'h70)) && $rx_done;
-         $is_m = (($rx_byte==8'h4D) || ($rx_byte==8'h6D)) && $rx_done;
-         $prog = !$reset_uart && $is_p
-                     ?1'b1:
-                  !$reset_uart && $is_m
-                     ?1'b0:
-                  >>1$prog;
-         $is_enter = $rx_byte==8'h0d && $rx_done;
-         $is_space = $rx_byte==8'h20 && $rx_done;
-         $is_next = $rx_byte==8'h3a && $rx_done;
-         $take_address = >>1$is_enter
-                           ? 1'b1:
-                        $is_next
-                           ?1'b0:
-                        >>1$take_address;
-         $take_data = >>1$is_next
-                           ? 1'b1:
-                        $is_enter
-                           ?1'b0:
-                        >>1$take_data;
+         $first_byte = $reset ? 1'b1 : >>1$first_byte + $rx_done;
+         $data[7:0] = (($rx_byte >= 8'h41 && $rx_byte <= 8'h46) || ($rx_byte >= 8'h61 && $rx_byte <= 8'h66))&& $rx_done && >>1$first_byte
+                        ? {($rx_byte[3:0] - 4'h7) , 4'b0}:
+                     $rx_done && >>1$first_byte
+                        ?{$rx_byte[3:0],4'b0}:
+                     (($rx_byte >= 8'h41 && $rx_byte <= 8'h46) || ($rx_byte >= 8'h61 && $rx_byte <= 8'h66)) && $rx_done
+                        ? {>>1$data[7:4],($rx_byte[3:0] - 4'h7)}:
+                     $rx_done
+                        ?{>>1$data[7:4],$rx_byte[3:0]}:
+                        >>1$data[7:0];
          
+         $imem_wr_addr[3:0] = >>1$pc[3:0];
+         $instr_wr_en = $rx_done && !>>1$first_byte && !$reset && $prog_mem;
+         $instr_wr[7:0] = $data;
+         $wr_en = $rx_done && !>>1$first_byte && !$reset && !$prog_mem;
+         $idata_wr_addr[3:0] = >>1$dptr[3:0];
+         $data_wr[7:0] = $data;
+         $digit[3:0] = *ui_in[0] ? $data[7:4]:$data[3:0];
+  
+   |lipsi
+      @1
          
-         $address[7:0] = $take_address && $rx_done
-                        ? $rx_byte:
-                           >>1$address;
-         
-         $data_u[7:0] = $take_data && $rx_done
-                        ? $rx_byte:
-                           >>1$data_u;
-         $first_digit = $is_next
-                          ? 1'b1:
-                       $is_enter
-                          ? 1'b1:
-                       $is_space
-                          ? 1'b0:
-                          >>1$first_digit;
-         $value_u[7:0] = ($data_u >= 8'h41 && $data_u <= 8'h46 && $first_digit && $rx_done)
-                           ? {($data_u[3:0] - 4'h7) , 4'h0}:
-                        ($data_u >= 8'h41 && $data_u <= 8'h46 && !$first_digit && $rx_done)
-                           ? {>>1$value_u[7:4],$data_u[3:0] - 4'h7}:
-                        ($data_u >= 8'h61 && $data_u <= 8'h66 && !$first_digit && $rx_done)
-                           ? {>>1$value_u[7:4],$data_u[3:0] - 4'h7}:
-                        ($data_u >= 8'h61 && $data_u <= 8'h66 && $first_digit && $rx_done)
-                           ? {$data_u[3:0] - 4'h7,4'h0}:
-                        ($first_digit && $rx_done)
-                           ? {$data_u[3:0],4'h0}:
-                        $rx_done
-                           ? {>>1$value_u[7:4],$data_u[3:0]}:
-                           >>1$value_u[7:0];
-         $address_u[7:0] = ($address >= 8'h41 && $address <= 8'h46 && $first_digit && $rx_done)
-                           ? {($address[3:0] - 4'h7) , 4'h0}:
-                        ($address >= 8'h41 && $address <= 8'h46 && !$first_digit && $rx_done)
-                           ? {>>1$address_u[7:4],($address[3:0] - 4'h7)}:
-                        ($address >= 8'h61 && $address <= 8'h69 && $first_digit && $rx_done)
-                           ? {$address[3:0] - 4'h7,4'h0}:
-                        ($address >= 8'h61 && $address <= 8'h69 && !$first_digit && $rx_done)
-                           ? {>>1$address_u[7:4],$address[3:0] - 4'h7}:
-                        $first_digit && $rx_done
-                           ? {$address[3:0],4'h0}:
-                        $rx_done
-                           ? {>>1$address_u[7:4],$address[3:0]}:
-                           >>1$address_u[7:0];
-         
-         
-         $instr_wr_en = $take_data && $rx_done && $prog;
-         $wr_en_u = $take_data && $rx_done && !$prog;
-         $imem_wr_addr[7:0] = $address_u;//$address;
-         $data_wr_u[7:0] = $wr_en_u && $take_data
-                           ? $value_u :
-                           >>1$data_wr_u;
-         $instr_wr[7:0] = $instr_wr_en? $value_u : >>1$instr_wr;
-         
-         
-         
-         
-         
-         //lipsi
-         $run = !*ui_in[7];
-         $reset_lipsi = *reset || !$run;
-         
+         $reset = *reset || /top/fpga_pins/fpga|fsm>>0$prog_select;
          //---------------------MEMORY - INITIALIZATION---------------
-         $imem_rd_addr[3:0] = $pc[3:0];
-         $instr[7:0] = $instr_mem;
-         $idata_rd_addr[3:0] = $dptr[3:0];
-         $data[7:0] = $data_rd;
+         
+         $instr[7:0] = /top/fpga_pins/fpga|fsm>>0$instr;
+         $data[7:0] = /top/fpga_pins/fpga|fsm>>0$data;
          
          //-----------------------PC - LOGIC -------------------------
-         $pc[3:0] = $reset_lipsi || >>1$reset_lipsi
-                       ? 4'b0:
+         $pc[7:0] = $reset || >>1$reset
+                       ? 8'b0:
                     >>1$exit || >>1$is_ld_ind || >>1$is_st_ind 
                        ? >>1$pc:
                     >>2$is_br || (>>2$is_brz && >>1$z) || (>>2$is_brnz && !>>1$z)
-                       ? >>1$instr[3:0]:
+                       ? >>1$instr:
                     >>1$is_brl
-                       ? >>1$acc[3:0]:
+                       ? >>1$acc:
                     >>1$is_ret
-                       ? >>1$data[3:0]+1'b1:
-                     >>1$pc + 4'b1;
+                       ? >>1$data+1'b1:
+                     >>1$pc + 8'b1;
          //---------------------DECODE - LOGIC -----------------------
-         $valid = (1'b1^>>1$is_2cyc) && !$reset_lipsi;
+         $valid = (1'b1^>>1$is_2cyc) && !$reset;
          
          $is_ALU_reg = $instr[7] == 0 && $valid;
          $is_st = $instr[7:4] == 4'b1000 && $valid ;
@@ -421,7 +447,7 @@ endmodule
                          ? >>1$instr[2:0] :
                       3'bxxx;
          
-         $dptr[7:0] = $reset_lipsi
+         $dptr[7:0] = $reset
                     ? 8'b0:
                  $is_ALU_reg || $is_ld_ind || $is_st || $is_st_ind || $is_brl
                     ? {4'b0,$instr[3:0]}:
@@ -434,7 +460,7 @@ endmodule
                     >>1$dptr;
          
          $rd_en = $is_ALU_reg || $is_ld_ind || >>1$is_ld_ind || $is_st_ind || $is_ret;
-         $wr_en_l = $is_st || >>1$is_st_ind || $is_brl;
+         $wr_en = $is_st || >>1$is_st_ind || $is_brl;
          $op[7:0] = >>1$is_ALU_imm
                        ? $instr :
                     $is_ALU_reg
@@ -443,7 +469,9 @@ endmodule
          $is_ALU = >>1$is_ALU_imm || $is_ALU_reg;
          
          /* verilator lint_off WIDTHEXPAND */
-         {$c,$acc[7:0]} = $is_ALU && $func == 3'b000
+         {$c,$acc[7:0]} = $reset
+                           ? 9'b0:
+                        $is_ALU && $func == 3'b000
                            ? >>1$acc + $op[7:0] :
                         $is_ALU && $func == 3'b000
                            ? >>1$acc + $op[7:0] :
@@ -475,56 +503,15 @@ endmodule
          
          /* verilator lint_on WIDTHEXPAND */
          $z = $acc == 8'b0;
-         $idata_wr_addr_l[3:0] = $dptr[3:0];
-         $data_wr_l[7:0] = !$wr_en_l 
-                            ? >>1$data_wr_l:
-                         !$is_brl 
-                            ? $acc[7:0]:
-                            $pc;
-         $digit[3:0] = !$reset_uart && ($take_data) && *ui_in[0]
-                        ? $instr_wr[7:4]:
-                     !$reset_uart && ($take_data)
-                        ? $instr_wr[3:0]:
-                     !$reset_uart && ($take_address) && *ui_in[0]
-                        ? $address_u[7:4]:
-                     !$reset_uart && ($take_address)
-                        ? $address_u[3:0]:
-                     *ui_in[0]
-                        ? $acc[7:4] :
-                        $acc[3:0];
-         *uo_out[7:0] = $digit[3:0] == 4'b0000
-             ? 8'b00111111 :
-             $digit[3:0] == 4'b0001
-             ? 8'b00000110 :
-             $digit[3:0] == 4'b0010
-             ? 8'b01011011 :
-             $digit[3:0] == 4'b0011
-             ? 8'b01001111 :
-             $digit[3:0] == 4'b0100
-             ? 8'b01100110 :
-             $digit[3:0] == 4'b0101
-             ? 8'b01101101 :
-             $digit[3:0] == 4'b0110
-             ? 8'b01111101 :
-             $digit[3:0] == 4'b0111
-             ? 8'b00000111 :
-             $digit[3:0] == 4'b1000
-             ? 8'b01111111 :
-             $digit[3:0] == 4'b1001
-             ? 8'b01101111 :
-             $digit[3:0] == 4'b1010
-             ? 8'b01110111 :
-             $digit[3:0] == 4'b1011
-             ? 8'b01111100 :
-             $digit[3:0] == 4'b1100
-             ? 8'b00111001 :
-             $digit[3:0] == 4'b1101
-             ? 8'b01011110 :
-             $digit[3:0] == 4'b1110
-             ? 8'b01111001 : 8'b01110001 ;
+         //$data_wr[7:0] = $wr_en? $acc : >>1$data_wr;
+         $data_wr[7:0] = !$wr_en ? >>1$data_wr:
+                         !$is_brl ? $acc:
+                         $pc;
+         $digit[3:0] = *ui_in[0]? $acc[7:4] : $acc[3:0];
          
          
-      m5+imem(@1)
+         
+      //m5+imem(@1)
    
    
    
@@ -577,7 +564,7 @@ module top(input logic clk, input logic reset, input logic [31:0] cyc_cnt, outpu
    // Instantiate the Tiny Tapeout module.
    m5_user_module_name tt(.*);
    
-   assign passed = top.cyc_cnt > 80;
+   assign passed = top.cyc_cnt > 800;
    assign failed = 1'b0;
 endmodule
 
