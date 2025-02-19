@@ -372,7 +372,7 @@ endmodule
          
          $reset = !/top/fpga_pins/fpga|fsm>>0$prog_select || *reset ;
          
-         $rx_serial = 1'b1;//*ui_in[6];   // pmod connector's TxD port
+         $rx_serial = *ui_in[6];   // pmod connector's TxD port
          
          $prog_mem = *ui_in[5];//0 means data 1 means instruction
          
