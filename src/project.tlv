@@ -37,26 +37,8 @@
    @_stage
       \SV_plus
          // The program in an instruction memory.
-         reg [7:0] instrs [16:0], datam[16:0];
-         initial begin
-             instrs[0] = 8'h70; // Custom 8-bit data for instruction 0
-             instrs[1] = 8'h01; // Custom 8-bit data for instruction 1
-             instrs[2] = 8'h80; // Custom 8-bit data for instruction 2
-             instrs[3] = 8'h72;
-             instrs[4] = 8'h13;
-             instrs[5] = 8'h82;
-             instrs[6] = 8'hC7;
-             instrs[7] = 8'h35;
-             instrs[8] = 8'hFF;
-             instrs[9] = 8'hFF; // Custom data for instruction 10
-             ///data values
-             datam[0] =8'h00;
-             datam[1] =8'h06;
-             datam[2] =8'h04;
-             datam[3] =8'h01;
-             datam[4] =8'h09;
-             datam[8] =8'h05;
-         end
+         reg [7:0] instrs [15:0], datam[15:0];
+         
       /* verilator lint_off WIDTHEXPAND */
       $instr_mem[7:0] = instrs\[$imem_rd_addr[3:0]\];
       ?$rd_en
@@ -71,112 +53,7 @@
       /* verilator lint_off WIDTHEXPAND */
 
 \SV
-module uart_tx 
-    #(parameter int FREQUENCY = 10000000, parameter int BAUD_RATE = 9600)
-    (
-        input logic clk,
-        input logic reset,
-        input logic tx_dv,
-        input logic [7:0] tx_byte, 
-        output logic tx_active,
-        output logic tx_serial,
-        output logic tx_done
-    );
 
-    typedef enum logic [2:0] {
-        s_IDLE          = 3'b000,
-        s_TX_START_BIT  = 3'b001,
-        s_TX_DATA_BITS  = 3'b010,
-        s_TX_STOP_BIT   = 3'b011,
-        s_CLEANUP       = 3'b100
-    } state_t;
-
-    localparam int CLKS_PER_BIT = FREQUENCY /  BAUD_RATE;
-
-    state_t r_SM_Main = s_IDLE;
-    logic [7:0] r_Clock_Count = 0;
-    logic [2:0] r_Bit_Index = 0;
-    logic [7:0] r_Tx_Data = 0;
-    logic r_Tx_Done = 0;
-    logic r_Tx_Active = 0;
-
-    always_ff @(posedge clk or posedge reset) begin
-        if (reset) begin
-            r_SM_Main <= s_IDLE;
-            r_Clock_Count <= 0;
-            r_Bit_Index <= 0;
-            r_Tx_Data <= 0;
-            r_Tx_Done <= 0;
-            r_Tx_Active <= 0;
-            tx_serial <= 1;
-        end else begin
-            case (r_SM_Main)
-                s_IDLE: begin
-                    tx_serial <= 1; // Line idle state
-                    r_Tx_Done <= 0;
-                    r_Clock_Count <= 0;
-                    r_Bit_Index <= 0;
-                    
-                    if (tx_dv) begin
-                        r_Tx_Active <= 1;
-                        r_Tx_Data <= tx_byte;
-                        r_SM_Main <= s_TX_START_BIT;
-                    end else begin
-                        r_SM_Main <= s_IDLE;
-                    end
-                end
-
-                s_TX_START_BIT: begin
-                    tx_serial <= 0; // Start bit
-                    if (r_Clock_Count < CLKS_PER_BIT - 1) begin
-                        r_Clock_Count <= r_Clock_Count + 1;
-                    end else begin
-                        r_Clock_Count <= 0;
-                        r_SM_Main <= s_TX_DATA_BITS;
-                    end
-                end
-
-                s_TX_DATA_BITS: begin
-                    tx_serial <= r_Tx_Data[r_Bit_Index];
-                    if (r_Clock_Count < CLKS_PER_BIT - 1) begin
-                        r_Clock_Count <= r_Clock_Count + 1;
-                    end else begin
-                        r_Clock_Count <= 0;
-                        if (r_Bit_Index < 7) begin
-                            r_Bit_Index <= r_Bit_Index + 1;
-                        end else begin
-                            r_Bit_Index <= 0;
-                            r_SM_Main <= s_TX_STOP_BIT;
-                        end
-                    end
-                end
-
-                s_TX_STOP_BIT: begin
-                    tx_serial <= 1; // Stop bit
-                    if (r_Clock_Count < CLKS_PER_BIT - 1) begin
-                        r_Clock_Count <= r_Clock_Count + 1;
-                    end else begin
-                        r_Tx_Done <= 1;
-                        r_Clock_Count <= 0;
-                        r_Tx_Active <= 0;
-                        r_SM_Main <= s_CLEANUP;
-                    end
-                end
-
-                s_CLEANUP: begin
-                    r_Tx_Done <= 1;
-                    r_SM_Main <= s_IDLE;
-                end
-
-                default: r_SM_Main <= s_IDLE;
-            endcase
-        end
-    end
-
-    assign tx_active = r_Tx_Active;
-    assign tx_done = r_Tx_Done;
-
-endmodule
 
 module uart_rx 
     #(parameter int FREQUENCY = 20_000_000, parameter int BAUD_RATE = 9600)
@@ -288,6 +165,672 @@ module uart_rx
     assign rx_byte = r_Rx_Byte;
 endmodule
 
+//`timescale  1ns/1ps
+
+//---------------------------------------------------------controller---------------------------------------------------
+
+module Controller (
+       input clk,
+       input reset,
+       input start,
+       input low,
+       input med,
+       input hig,
+       output heating_op,
+       output spinning_op, 
+       output pouring_op,
+       output waiting_op,
+       output prog_op,
+       output level_op,
+       output temp_op,
+       output dura_op
+   );
+
+   /*
+   reset is also used as stop here 
+   */
+
+   //-------------------------------------------------------state variable-------------------------------------------------
+
+       reg [2:0] state_var;                //holds the state values
+       reg [2:0] next_state_var;           //holds the next state values 
+       reg [2:0] prev_state;
+       always @(next_state_var) begin
+           state_var <= next_state_var;    //transfers the state values for the next state
+       end
+      
+   //--------------------------------------------------------output variables----------------------------------------------
+      
+      reg heating;
+      reg pouring;
+      reg waiting;
+      reg spinning;
+      reg prog_op_reg;
+      reg level_op_reg;
+      reg temp_op_reg;
+      reg dura_op_reg;
+      
+   //--------------------------------------------------------state values--------------------------------------------------
+
+       //these variables holds the value of the state variable for comparison
+
+       parameter program_selection = 3'd1;             
+       parameter temperature_selection = 3'd2;
+       parameter water_level_selection = 3'd3;
+       parameter duration = 3'd4;
+       parameter wash = 3'd5;
+       parameter rinse = 3'd6;
+       parameter dry = 3'd7;
+
+   //--------------------------------------------------------parameters---------------------------------------------------
+
+       parameter med_heating = 12'd420; //12'd35; //enter med heating time => depends on temp     => 2.5 mins
+       parameter hig_heating = 12'd840; //12'd70; //enter hig heating time => depends on temp     => 5 mins
+       parameter low_pouring = 12'd200; //12'd28; //enter low pouring time => depends on level    => 2 mins
+       parameter med_pouring = 12'd350; //12'd42; //enter med pouring time => depends on level    => 3 mins
+       parameter hig_pouring = 12'd400; //12'd56; //enter hig pouring time => depends on level    => 4 mins
+       /*
+           proper time assignment is left that should be done here 
+           low timer => 5 mins 
+           med timer => 15 mins 
+           hig timer => 30 mins
+       */
+       parameter low_timer = 12'd2000; //12'd70; //enter time for low duration wash => depends on timer
+       parameter med_timer = 12'd3000; //12'd210; //enter time for low duration wash => depends on timer
+       parameter hig_timer = 12'd4000; //12'd420; //enter time for low duration wash => depends on timer
+
+
+   //-------------------------------------------------------input_for_states-----------------------------------------------
+
+       reg [1:0] timer;          //stores time signal
+
+       reg [1:0] Program;          //stores mode signal
+
+       reg [1:0] temp;             //stores temperature signal
+
+       reg [1:0] level;            //stores water level signal
+
+       reg [1:0] counter_status;   //stores counter status
+
+       //reg count_done;             //doing nothing important 
+
+       reg rinse_status;           //provide rinse status for counter
+
+       reg dry_status;             //provide drying status for counter
+
+       reg [11:0] max_count;
+
+   //----------------------------------------------------------controller--------------------------------------------------
+
+       //always @(posedge clk or posedge reset or posedge start) begin
+       always @(posedge clk) begin
+           prev_state <= state_var;
+           //synthesizable INITIAL BLOCK
+           if(reset)
+               //when reset is high the value of all the registers changes to zero (DEFAULT VALUE)
+               begin
+                   timer <= 2'b0;
+                   Program <= 2'b0;
+                   temp <= 2'b0;
+                   level <= 2'b0;
+                   prog_op_reg <= 1'b0;
+                   dura_op_reg <= 1'b0;
+                   level_op_reg <= 1'b0;
+                   temp_op_reg <= 1'b0;
+                   //counter_status <= 2'b0;
+                   next_state_var <= 3'b0;
+                   //count_done <= 1'b0;
+                   //rinse_status <= 1'b0;
+                   //dry_status <= 1'b0;
+                   //max_count <= 12'b0;
+
+                   //assigning output vairables to zero during reset
+
+                   //heating <= 1'b0;
+                   waiting <= 1'b0;
+                   //spinning <= 1'b0;
+                   //pouring <= 1'b0;
+               end
+           else if(start)
+               //when start signal is applied the value of the state variable increases by one
+               begin
+                   next_state_var <= 3'b01;
+               end
+           else 
+               begin
+                   case (state_var)   
+
+                       //Program selection stage
+
+                       program_selection:
+                           begin 
+                               prog_op_reg <= 1'b1;
+                               waiting <= 1'b1;
+                               if(low)
+                                   begin
+                                       Program <= 2'd1;
+                                   end
+                               else if(med)
+                                   begin
+                                       Program <= 2'd2;
+                                   end
+                               else if(hig)
+                                   begin
+                                       Program <= 2'd3;
+                                   end
+                               else if(next_state_var == temperature_selection |(Program != 2'b0 && (!low & !med & !hig)))
+                                   begin
+                                       next_state_var <= temperature_selection;
+                                       waiting <= 1'b0;
+                                   end
+                               else
+                                   next_state_var <= program_selection;
+                           end
+
+                       //temperature selection stage 
+
+                       temperature_selection:
+                           begin
+                               temp_op_reg <= 1'b1;
+                               waiting <= 1'b1;
+                               if(low)
+                                   begin
+                                       temp <= 2'd1;
+                                   end
+                               else if(med)
+                                   begin
+                                       temp <= 2'd2;
+                                   end
+                               else if(hig)
+                                   begin
+                                       temp <= 2'd3;
+                                   end
+                               else if(next_state_var == water_level_selection |(temp != 2'b0 && (!low & !med & !hig)))
+                                   begin
+                                       next_state_var <= water_level_selection;
+                                       waiting <= 1'b0;
+                                   end
+                               else 
+                                   next_state_var <= temperature_selection;
+                           end
+
+                       //water level selection stage 
+
+                       water_level_selection:
+                           begin
+                               level_op_reg <= 1'b1;
+                               waiting <= 1'b1;
+                               if(low)
+                                   begin
+                                       level <= 2'd1;
+                                   end
+                               else if(med)
+                                   begin
+                                       level <= 2'd2;
+                                   end
+                               else if(hig)
+                                   begin
+                                       level <= 2'd3;
+                                   end
+                               else if(next_state_var == duration |(level != 2'b0 && (!low & !med & !hig)))
+                                   begin
+                                       next_state_var <= duration;
+                                       waiting <= 1'b0;
+                                   end
+                               else 
+                                   next_state_var <= water_level_selection;
+                           end
+
+                       //duration selecion stage (updating timer value)
+
+                       duration:
+                           begin
+                               dura_op_reg <= 1'b1;
+                               waiting <= 1'b1;
+                               if(low)
+                                   begin
+                                       timer <= 2'd1;
+                                   end
+                               else if(med)
+                                   begin
+                                       timer <= 2'd2;
+                                   end
+                               else if(hig)
+                                   begin
+                                       timer <= 2'd3;
+                                   end
+                               else if(next_state_var == wash |(timer != 2'b0 && (!low & !med & !hig)))
+                                   begin
+                                       next_state_var <= wash;
+                                       //count_done <= 1'b0;
+                                       waiting <= 1'b0;
+                                   end
+                               else 
+                                   next_state_var <= duration;
+                           end
+                       wash:
+                           begin
+                               //spinning <= 1'b1;
+                               prog_op_reg <= 1'b0;
+                               if(counter_status == 2'd2)
+                                   begin
+                                       next_state_var <= rinse;
+                                   end
+                               else
+                                   begin
+                                       next_state_var <= wash;
+                                   end
+                           end
+                       rinse:
+                           begin
+                               level_op_reg <= 1'b0;
+                               temp_op_reg <= 1'b0;
+                               if(counter_status == 2'd2)
+                                   begin
+                                       next_state_var <= dry;
+                                   end
+                               else
+                                   begin
+                                       next_state_var <= rinse;
+                                   end
+                           end
+                       dry:
+                           begin
+                               if(counter_status == 2'd2)
+                                   begin
+                                       dura_op_reg <= 1'b0;
+                                       next_state_var <= 3'dx;
+                                       timer <= 2'b0;
+                                       Program <= 2'b0;
+                                       temp <= 2'b0;
+                                       level <= 2'b0;
+                                       //counter_status <= 2'b0;
+                                       next_state_var <= 3'b0;
+                                       //count_done = 1'b0;
+                                       //spinning <= 1'b0;
+                                   end
+                               else
+                                   begin
+                                       next_state_var <= dry;
+                                   end
+                           end
+                           //default
+                       default: 
+                           //this state can be used for pause as well 
+                           next_state_var <= next_state_var;
+
+                   endcase
+               end
+           
+       end
+
+   //------------------------------------------------------------counter----------------------------------------------------
+
+
+       //set appropriate counter values: 
+       reg [11:0] counter1 ;
+       reg [31:0] counter2 ;
+
+       //always @(posedge clk or posedge reset) begin
+       always @(posedge clk) begin
+           if(state_var == 3'b0)
+              spinning <= 1'b0;
+           else 
+              spinning <= spinning;
+           if(reset)
+           begin
+               counter1 = 12'b0;
+               counter2 <= 32'b0;
+               max_count <= 12'b0;
+               pouring <= 1'b0;
+               heating <= 1'b0;
+               spinning <= 1'b0;
+               rinse_status <= 1'b0;
+               dry_status <= 1'b0;
+               counter_status <= 2'b0;
+           end
+           else
+               begin
+                   case (state_var)
+                       wash:
+                           begin
+                               if(timer == 2'd1 && counter_status == 2'b0)
+                                   begin
+                                       counter1 = low_timer; 
+                                       if((temp==2'd1)&&(level==2'd1))
+                                           counter1 = counter1 + low_pouring;
+                                       else if((temp==2'd1)&&(level==2'd2))
+                                           counter1 = counter1 + med_pouring;
+                                       else if((temp==2'd1)&&(level==2'd3))
+                                           counter1 = counter1 + hig_pouring;
+                                       else if((temp==2'd2)&&(level==2'd1))
+                                           counter1 = counter1 + med_heating + low_pouring;
+                                       else if((temp==2'd2)&&(level==2'd2))
+                                           counter1 = counter1 + med_heating + med_pouring;
+                                       else if((temp==2'd2)&&(level==2'd3))
+                                           counter1 = counter1 + med_heating + hig_pouring;
+                                       else if((temp==2'd3)&&(level==2'd1))
+                                           counter1 = counter1 + hig_heating + low_pouring;
+                                       else if((temp==2'd3)&&(level==2'd2))
+                                           counter1 = counter1 + hig_heating + med_pouring;
+                                       else if((temp==2'd3)&&(level==2'd3))
+                                           counter1 = counter1 + hig_heating + hig_pouring;
+                                       else
+                                           counter1 = counter1;
+
+                                       max_count <= counter1;
+
+                                   end
+                               else if(timer == 2'd2 && counter_status == 2'b0)
+                                   begin
+                                       counter1 = med_timer;
+                                       if((temp==2'd1)&&(level==2'd1))
+                                           counter1 = counter1 + low_pouring;
+                                       else if((temp==2'd1)&&(level==2'd2))
+                                           counter1 = counter1 + med_pouring;
+                                       else if((temp==2'd1)&&(level==2'd3))
+                                           counter1 = counter1 + hig_pouring;
+                                       else if((temp==2'd2)&&(level==2'd1))
+                                           counter1 = counter1 + med_heating + low_pouring;
+                                       else if((temp==2'd2)&&(level==2'd2))
+                                           counter1 = counter1 + med_heating + med_pouring;
+                                       else if((temp==2'd2)&&(level==2'd3))
+                                           counter1 = counter1 + med_heating + hig_pouring;
+                                       else if((temp==2'd3)&&(level==2'd1))
+                                           counter1 = counter1 + hig_heating + low_pouring;
+                                       else if((temp==2'd3)&&(level==2'd2))
+                                           counter1 = counter1 + hig_heating + med_pouring;
+                                       else if((temp==2'd3)&&(level==2'd3))
+                                           counter1 = counter1 + hig_heating + hig_pouring;
+                                       else
+                                           counter1 = counter1;
+
+                                       max_count <= counter1;
+
+                                   end
+                               else if(timer == 2'd3 && counter_status == 2'b0)
+                                   begin
+                                       counter1 = hig_timer; 
+                                       if((temp==2'd1)&&(level==2'd1))
+                                           counter1 = counter1 + low_pouring;
+                                       else if((temp==2'd1)&&(level==2'd2))
+                                           counter1 = counter1 + med_pouring;
+                                       else if((temp==2'd1)&&(level==2'd3))
+                                           counter1 = counter1 + hig_pouring;
+                                       else if((temp==2'd2)&&(level==2'd1))
+                                           counter1 = counter1 + med_heating + low_pouring;
+                                       else if((temp==2'd2)&&(level==2'd2))
+                                           counter1 = counter1 + med_heating + med_pouring;
+                                       else if((temp==2'd2)&&(level==2'd3))
+                                           counter1 = counter1 + med_heating + hig_pouring;
+                                       else if((temp==2'd3)&&(level==2'd1))
+                                           counter1 = counter1 + hig_heating + low_pouring;
+                                       else if((temp==2'd3)&&(level==2'd2))
+                                           counter1 = counter1 + hig_heating + med_pouring;
+                                       else if((temp==2'd3)&&(level==2'd3))
+                                           counter1 = counter1 + hig_heating + hig_pouring;
+                                       else
+                                           counter1 = counter1;
+
+                                       max_count <= counter1;
+
+                                   end
+                               else if((counter1 != 12'b0) && (counter2 == 32'b0))
+                                   begin
+                                       counter1 = counter1 - 12'b1;
+                                   end
+                               else
+                                   begin
+                                       counter1 = counter1;
+                                       //code the conditions for heating and pouring here 
+
+                                       if(temp==2'd1 && level==2'd1)
+                                           begin
+                                               if((max_count - counter1) <=  low_pouring )
+                                                   begin
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       heating <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd1 && level==2'd2)
+                                           begin
+                                               if((max_count - counter1) <= med_pouring)
+                                                   begin
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       heating <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd1 && level==2'd3)
+                                           begin
+                                               if((max_count - counter1) <= hig_pouring )
+                                                   begin
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       heating <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd2 && level==2'd1)
+                                           begin
+                                               if((max_count - counter1) <= med_heating )
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (med_heating + low_pouring) )
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd2 && level==2'd2)
+                                           begin
+                                               if((max_count - counter1) <= med_heating )
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (med_heating + med_pouring))
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd2 && level==2'd3)
+                                           begin
+                                               if((max_count - counter1) <= med_heating )
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (med_heating + hig_pouring) )
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd3 && level==2'd1)
+                                           begin
+                                               if((max_count - counter1) <= hig_heating )
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (hig_heating + low_pouring) )
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd3 && level==2'd2)
+                                           begin
+                                               if((max_count - counter1) <= hig_heating)
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (hig_heating + med_pouring))
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else if(temp==2'd3 && level==2'd3)
+                                           begin
+                                               if((max_count - counter1) <= hig_heating)
+                                                   begin
+                                                       heating <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                       pouring <= 1'b0;
+                                                   end
+                                               else if((max_count - counter1) <= (hig_heating + hig_pouring))
+                                                   begin
+                                                       heating <= 1'b0;
+                                                       pouring <= 1'b1;
+                                                       spinning <= 1'b0;
+                                                   end
+                                               else
+                                                   begin
+                                                       pouring <= 1'b0;
+                                                       spinning <= 1'b1;
+                                                       heating <= 1'b0;
+                                                   end
+                                           end
+                                       else
+                                           begin
+                                               pouring <= 1'b0;
+                                               heating <= 1'b0;
+                                               spinning <= 1'b0;
+                                           end
+                                   end
+                           end
+                       rinse:
+                           begin
+                               if((counter1 == 12'b0) && (!rinse_status))
+                                   begin
+                                       counter1 = 12'd800;
+                                       rinse_status <= 1'b1;
+                                   end
+                               else if((counter1 != 12'b0) && (counter2 == 32'b0))
+                                   counter1 = counter1 - 12'b1;
+                               else 
+                                   counter1 = counter1;
+                           end
+                       dry:
+                           begin
+                               if((counter1 == 12'b0) && (!dry_status))
+                                   begin
+                                       counter1 = 12'd800;
+                                       dry_status <= 1'b1;
+                                   end
+                               else if((counter1 != 12'b0) && (counter2 == 32'b0))
+                                   counter1 = counter1 - 12'b1;
+                               else 
+                                   counter1 = counter1;
+                           end
+                       default:
+                          begin 
+                             counter1 = counter1;
+                      		  heating <= 1'b0;
+                             pouring <= 1'b0;
+                 //     		  waiting <= 1'b0;
+                      		  spinning <= 1'b0;
+                          end
+                   endcase
+
+                   if((counter1 != 12'b0)  && (counter2 != 32'b0))
+                       counter2 <= counter2 - 32'b1;
+                   else if((counter1 != 12'b0) && (counter2 == 32'b0))
+                       counter2 <= 32'h00ffffff;//32'd8; //32'hffffffff;
+                   else 
+                       counter2 <= 32'h00ffffff;//32'd8; //32'hffffffff;
+
+                   //COUNTER TERMINATING CONDITIONS
+
+                   if((counter1 == 12'b0) && ((state_var == wash) | (state_var == rinse) | (state_var == dry)) && (counter_status == 2'd1))
+                       counter_status <= 2'd2;
+                   else if((state_var == wash) | (state_var == rinse) | (state_var == dry))
+                       counter_status <= 2'b1;
+                   else if(prev_state != state_var)
+                       counter_status <= 2'b0;
+                   else
+                       counter_status <= 2'b0;
+               end
+
+       end
+
+       //OUTPUT ASSIGNMENT 
+       assign heating_op = heating;
+       assign pouring_op = pouring;
+       assign waiting_op = waiting;
+       assign spinning_op = spinning;
+       assign prog_op = prog_op_reg;
+       assign level_op = level_op_reg;
+       assign temp_op = temp_op_reg;
+       assign dura_op = dura_op_reg;
+
+endmodule
+
+
 \SV
    // Include Tiny Tapeout Lab.
    m4_include_lib(['https:/']['/raw.githubusercontent.com/os-fpga/Virtual-FPGA-Lab/5744600215af09224b7235479be84c30c6e50cb7/tlv_lib/tiny_tapeout_lib.tlv'])
@@ -306,7 +849,9 @@ endmodule
    // Note that pipesignals assigned here can be found under /fpga_pins/fpga.
    |fsm
       @1
-         $prog_select = *ui_in[7];// 0 means lipsi 1 means uart
+         $wm_select = *ui_in[0] ;
+         $prog_select = *ui_in[7] && !$wm_select;// 0 means lipsi 1 means uart
+         $lipsi_select = !$wm_select && !$prog_select;
          
          $imem_rd_addr[3:0] = /top/fpga_pins/fpga|lipsi>>0$pc[3:0];
          $instr[7:0] = $instr_mem;
@@ -323,37 +868,65 @@ endmodule
          $imem_wr_addr[3:0] = /top/fpga_pins/fpga|uart>>0$imem_wr_addr[3:0];
          $instr_wr_en = /top/fpga_pins/fpga|uart>>0$instr_wr_en;
          $digit[3:0] = /top/fpga_pins/fpga|lipsi>>0$reset ? /top/fpga_pins/fpga|uart>>0$digit : /top/fpga_pins/fpga|lipsi>>0$digit;
-         *uo_out[7:0] = $digit[3:0] == 4'b0000
-             ? 8'b00111111 :
-             $digit[3:0] == 4'b0001
-             ? 8'b00000110 :
-             $digit[3:0] == 4'b0010
-             ? 8'b01011011 :
-             $digit[3:0] == 4'b0011
-             ? 8'b01001111 :
-             $digit[3:0] == 4'b0100
-             ? 8'b01100110 :
-             $digit[3:0] == 4'b0101
-             ? 8'b01101101 :
-             $digit[3:0] == 4'b0110
-             ? 8'b01111101 :
-             $digit[3:0] == 4'b0111
-             ? 8'b00000111 :
-             $digit[3:0] == 4'b1000
-             ? 8'b01111111 :
-             $digit[3:0] == 4'b1001
-             ? 8'b01101111 :
-             $digit[3:0] == 4'b1010
-             ? 8'b01110111 :
-             $digit[3:0] == 4'b1011
-             ? 8'b01111100 :
-             $digit[3:0] == 4'b1100
-             ? 8'b00111001 :
-             $digit[3:0] == 4'b1101
-             ? 8'b01011110 :
-             $digit[3:0] == 4'b1110
-             ? 8'b01111001 : 8'b01110001 ;
+         *uo_out[7:0] = $wm_select
+               ?/top/fpga_pins/fpga|controller>>0$out:
+            $digit[3:0] == 4'b0000
+               ? 8'b00111111 :
+            $digit[3:0] == 4'b0001
+               ? 8'b00000110 :
+            $digit[3:0] == 4'b0010
+               ? 8'b01011011 :
+            $digit[3:0] == 4'b0011
+               ? 8'b01001111 :
+            $digit[3:0] == 4'b0100
+               ? 8'b01100110 :
+            $digit[3:0] == 4'b0101
+               ? 8'b01101101 :
+            $digit[3:0] == 4'b0110
+               ? 8'b01111101 :
+            $digit[3:0] == 4'b0111
+               ? 8'b00000111 :
+            $digit[3:0] == 4'b1000
+               ? 8'b01111111 :
+            $digit[3:0] == 4'b1001
+               ? 8'b01101111 :
+            $digit[3:0] == 4'b1010
+               ? 8'b01110111 :
+            $digit[3:0] == 4'b1011
+               ? 8'b01111100 :
+            $digit[3:0] == 4'b1100
+               ? 8'b00111001 :
+            $digit[3:0] == 4'b1101
+               ? 8'b01011110 :
+            $digit[3:0] == 4'b1110
+               ? 8'b01111001 : 8'b01110001 ;
       m5+imem(@1)
+      
+   |controller
+      @1
+         $reset = !/top/fpga_pins/fpga|fsm>>0$wm_select || *reset ;
+         $clk = *clk;
+         $start = *ui_in[1];
+         $low = *ui_in[2];
+         $med = *ui_in[3];
+         $hig = *ui_in[4];
+         
+         \SV_plus
+            Controller C1(.clk($clk),
+                        .reset($reset),
+                        .start($start),
+                        .low($low),
+                        .hig($hig),
+                        .med($med),
+                        .heating_op($$heat),
+                        .spinning_op($$spin),
+                        .pouring_op($$pour),
+                        .waiting_op($$wait),
+                        .prog_op($$prog),
+                        .level_op($$level),
+                        .temp_op($$temp),
+                        .dura_op($$dura));
+         $out[7:0] = {$heat,$spin,$pour,$wait,$prog,$level,$temp,$dura};
    
    |uart
       @1
@@ -372,9 +945,9 @@ endmodule
          
          $reset = !/top/fpga_pins/fpga|fsm>>0$prog_select || *reset ;
          
-         $rx_serial = *ui_in[6];   // pmod connector's TxD port
+         $rx_serial = !$reset;   // pmod connector's TxD port
          
-         $prog_mem = *ui_in[5];//0 means data 1 means instruction
+         $prog_mem = *ui_in[6];//0 means data 1 means instruction
          
          \SV_plus
             uart_rx #(20000000,115200) uart_rx_1(.clk(*clk),
@@ -400,12 +973,12 @@ endmodule
          $wr_en = $rx_done && !>>1$first_byte && !$reset && !$prog_mem;
          $idata_wr_addr[3:0] = >>1$dptr[3:0];
          $data_wr[7:0] = $data;
-         $digit[3:0] = *ui_in[0] ? $data[7:4]:$data[3:0];
+         $digit[3:0] = *ui_in[1] ? $data[7:4]:$data[3:0];
   
    |lipsi
       @1
          
-         $reset = *reset || /top/fpga_pins/fpga|fsm>>0$prog_select;
+         $reset = *reset || !/top/fpga_pins/fpga|fsm>>0$lipsi_select;
          //---------------------MEMORY - INITIALIZATION---------------
          
          $instr[7:0] = /top/fpga_pins/fpga|fsm>>0$instr;
@@ -507,7 +1080,7 @@ endmodule
          $data_wr[7:0] = !$wr_en ? >>1$data_wr:
                          !$is_brl ? $acc:
                          $pc;
-         $digit[3:0] = *ui_in[0]? $acc[7:4] : $acc[3:0];
+         $digit[3:0] = *ui_in[1]? $acc[7:4] : $acc[3:0];
          
          
          
