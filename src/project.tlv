@@ -38,7 +38,25 @@
       \SV_plus
          // The program in an instruction memory.
          reg [7:0] instrs [15:0], datam[15:0];
-         
+         initial begin
+             instrs[0] = 8'h70; // Custom 8-bit data for instruction 0
+             instrs[1] = 8'h01; // Custom 8-bit data for instruction 1
+             instrs[2] = 8'h80; // Custom 8-bit data for instruction 2
+             instrs[3] = 8'h72;
+             instrs[4] = 8'h13;
+             instrs[5] = 8'h82;
+             instrs[6] = 8'hC7;
+             instrs[7] = 8'h35;
+             instrs[8] = 8'hFF;
+             instrs[9] = 8'hFF; // Custom data for instruction 10
+             ///data values
+             datam[0] =8'h00;
+             datam[1] =8'h06;
+             datam[2] =8'h04;
+             datam[3] =8'h01;
+             datam[4] =8'h09;
+             datam[8] =8'h05;
+         end
       /* verilator lint_off WIDTHEXPAND */
       $instr_mem[7:0] = instrs\[$imem_rd_addr[3:0]\];
       ?$rd_en
@@ -818,6 +836,14 @@ module Controller (
 
        end
 
+       //reseting the state variable
+
+      /* always @(state_var) begin
+
+           counter_status <= 2'b0;
+
+       end */
+     
        //OUTPUT ASSIGNMENT 
        assign heating_op = heating;
        assign pouring_op = pouring;
@@ -945,9 +971,9 @@ endmodule
          
          $reset = !/top/fpga_pins/fpga|fsm>>0$prog_select || *reset ;
          
-         $rx_serial = *ui_in[5]&&!$reset;   // pmod connector's TxD port
+         $rx_serial = *ui_in[6];   // pmod connector's TxD port
          
-         $prog_mem = *ui_in[6];//0 means data 1 means instruction
+         $prog_mem = *ui_in[5];//0 means data 1 means instruction
          
          \SV_plus
             uart_rx #(20000000,115200) uart_rx_1(.clk(*clk),
